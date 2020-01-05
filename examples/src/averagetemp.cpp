@@ -5,6 +5,7 @@
 #include <chrono>
 #include <thread>
 #include "headers/MLX90640_API.h"
+#include <ctime>
 
 #define ANSI_COLOR_RED     "\x1b[31m"
 #define ANSI_COLOR_GREEN   "\x1b[32m"
@@ -21,6 +22,32 @@
 
 #define MLX_I2C_ADDR 0x33
 
+void write_header(std::ofstream &log_file, int readings, float averageTemp)
+{
+   time_t now;
+   time(&now);
+   char buf[sizeof "2011-10-08T07:07:09Z"];
+   strftime(buf, sizeof buf, "%FT%TZ", gmtime(&now));
+
+   log_file << buf << ',';
+   log_file << readings << ',';
+   log_file << averageTemp << std::endl;
+}
+
+void write_readings(std::ofstream &log_file, float mlx90640To[])
+{
+   for (int x = 0; x < 32; x++)
+   {
+      for (int y = 0; y < 24; y++)
+      {
+         float val = mlx90640To[32 * (23 - y) + x];
+
+         log_file << val << ",";
+      }
+      log_file << std::endl;
+   }
+}
+
 int main(){
     int state = 0;
     //printf("Starting...\n");
@@ -30,6 +57,9 @@ int main(){
     static float image[768];
     float eTa;
     static uint16_t data[768*sizeof(float)];
+    std::ofstream logger_file;
+
+    setbuf(stdout, NULL);
 
     std::fstream fs;
 
@@ -63,7 +93,8 @@ int main(){
         MLX90640_BadPixelsCorrection((&mlx90640)->outlierPixels, mlx90640To, 1, &mlx90640);
 
         float average = 0.0;
-        float in_range_readings = 0.0;
+        int in_range_readings = 0;
+        int flame_readings = 0;
         float in_range_total = 0.0;
 
         for(int x = 0; x < 32; x++){
@@ -74,14 +105,23 @@ int main(){
                    in_range_total+= val;
                    in_range_readings++;
                 }
+                if (val > 100.0) {
+                   flame_readings++;
+                }
             }
             //std::cout << std::endl;
         }
-        if (in_range_total > 0.0) {
+        if (in_range_total > 0) {
            average = in_range_total / in_range_readings;
         }
-        printf("%f\n", average);
-        std::this_thread::sleep_for(std::chrono::milliseconds(900));
+        printf("%f,%d,%d\n", average, in_range_readings, flame_readings);
+
+        logger_file.open("temperature_readings_log.csv", std::ios::app);
+        write_header(logger_file, flame_readings, average);
+        write_readings(logger_file, mlx90640To);
+        logger_file.close();
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(4000));
         //printf("\x1b[33A");
         //printf("\x1b[1A");
     }
